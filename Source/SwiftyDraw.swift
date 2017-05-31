@@ -217,7 +217,7 @@ open class SwiftyDrawView: UIView {
     
     /// Return a (possibly) scaled and (possibly) cropped image of the drawing.
     
-    func asImage(scale: CGFloat = 1, cropped: Bool = false) -> UIImage? {
+    public func asImage(scale: CGFloat = 1, cropped: Bool = false) -> UIImage? {
         UIGraphicsBeginImageContextWithOptions(bounds.size, false, scale)
         guard let context = UIGraphicsGetCurrentContext() else {
             return nil
@@ -295,7 +295,7 @@ open class SwiftyDrawView: UIView {
     
     /********************************** Private Image Helper Functions **********************************/
     
-    func croppedImageByAlphaFor(_ image: UIImage) -> UIImage? {
+    private func croppedImageByAlphaFor(_ image: UIImage) -> UIImage? {
         let newRect = cropRectByAlphaFor(image)
         if let cgImage = image.cgImage!.cropping(to: newRect) {
             return UIImage(cgImage: cgImage)
@@ -303,7 +303,7 @@ open class SwiftyDrawView: UIView {
         return nil
     }
     
-    func cropRectByAlphaFor(_ image: UIImage) -> CGRect {
+    private func cropRectByAlphaFor(_ image: UIImage) -> CGRect {
         
         let cgImage = image.cgImage
         let context = createARGBBitmapContextFromImage(inImage: cgImage!)
@@ -357,7 +357,7 @@ open class SwiftyDrawView: UIView {
         return CGRect(x: lowX, y: lowY, width: highX - lowX, height: highY - lowY)
     }
     
-    func createARGBBitmapContextFromImage(inImage: CGImage) -> CGContext? {
+    private func createARGBBitmapContextFromImage(inImage: CGImage) -> CGContext? {
         
         let width = inImage.width
         let height = inImage.height
