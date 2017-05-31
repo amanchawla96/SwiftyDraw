@@ -1,17 +1,17 @@
 /*Copyright (c) 2016, Andrew Walz.
- 
- Redistribution and use in source and binary forms, with or without modification,are permitted provided that the following conditions are met:
- 
- 1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
- 
- 2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the
- documentation and/or other materials provided with the distribution.
- 
- THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
- THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS
- BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
- GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. */
+
+Redistribution and use in source and binary forms, with or without modification,are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the
+documentation and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS
+BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
+GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. */
 
 import UIKit
 
@@ -20,37 +20,37 @@ import UIKit
 
 /// SwiftyDrawView Delegate
 
-public protocol SwiftyDrawViewDelegate {
+public protocol SwiftyDrawViewDelegate: class {
     
     /**
-     SwiftyDrawViewDelegate called when a touch gesture begins on the SwiftyDrawView.
-     
-     - Parameter view: SwiftyDrawView where touches occured.
-     */
+    SwiftyDrawViewDelegate called when a touch gesture begins on the SwiftyDrawView.
+    
+    - Parameter view: SwiftyDrawView where touches occured.
+    */
     
     func SwiftyDrawDidBeginDrawing(view: SwiftyDrawView)
     
     /**
-     SwiftyDrawViewDelegate called when touch gestures continue on the SwiftyDrawView.
-     
-     - Parameter view: SwiftyDrawView where touches occured.
-     */
+    SwiftyDrawViewDelegate called when touch gestures continue on the SwiftyDrawView.
+    
+    - Parameter view: SwiftyDrawView where touches occured.
+    */
     
     func SwiftyDrawIsDrawing(view: SwiftyDrawView)
     
     /**
-     SwiftyDrawViewDelegate called when touches gestures finish on the SwiftyDrawView.
-     
-     - Parameter view: SwiftyDrawView where touches occured.
-     */
+    SwiftyDrawViewDelegate called when touches gestures finish on the SwiftyDrawView.
+    
+    - Parameter view: SwiftyDrawView where touches occured.
+    */
     
     func SwiftyDrawDidFinishDrawing(view: SwiftyDrawView)
     
     /**
-     SwiftyDrawViewDelegate called when there is an issue registering touch gestures on the  SwiftyDrawView.
-     
-     - Parameter view: SwiftyDrawView where touches occured.
-     */
+    SwiftyDrawViewDelegate called when there is an issue registering touch gestures on the  SwiftyDrawView.
+    
+    - Parameter view: SwiftyDrawView where touches occured.
+    */
     
     func SwiftyDrawDidCancelDrawing(view: SwiftyDrawView)
 }
@@ -92,7 +92,7 @@ open class SwiftyDrawView: UIView {
     public var drawingEnabled         : Bool      = true
     
     /// Public SwiftyDrawView delegate
-    public var delegate               : SwiftyDrawViewDelegate?
+    public weak var delegate               : SwiftyDrawViewDelegate?
     
     
     private var pathArray             : [Line]    = []
@@ -133,7 +133,7 @@ open class SwiftyDrawView: UIView {
     override open func draw(_ rect: CGRect) {
         let context : CGContext = UIGraphicsGetCurrentContext()!
         context.setLineCap(.round)
-
+        
         for line in pathArray {
             context.setLineWidth(line.width)
             context.setAlpha(line.opacity)
@@ -162,7 +162,7 @@ open class SwiftyDrawView: UIView {
     }
     
     /// touchesMoves implementation to capture strokes
-
+    
     
     override open func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard drawingEnabled == true else {
@@ -180,7 +180,7 @@ open class SwiftyDrawView: UIView {
     }
     
     /// touchedEnded implementation to capture strokes
-
+    
     override open func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard drawingEnabled == true else {
             return
@@ -215,7 +215,40 @@ open class SwiftyDrawView: UIView {
         setNeedsDisplay()
     }
     
-/********************************** Private Functions **********************************/
+    /// Return a (possibly) scaled and (possibly) cropped image of the drawing.
+    
+    func asImage(scale: CGFloat = 1, cropped: Bool = false) -> UIImage? {
+        UIGraphicsBeginImageContextWithOptions(bounds.size, false, scale)
+        guard let context = UIGraphicsGetCurrentContext() else {
+            return nil
+        }
+        
+        context.setLineCap(.round)
+        
+        for line in pathArray {
+            context.setLineWidth(line.width)
+            context.setAlpha(line.opacity)
+            context.setStrokeColor(line.color.cgColor)
+            context.addPath(line.path)
+            context.beginTransparencyLayer(auxiliaryInfo: nil)
+            context.strokePath()
+            context.endTransparencyLayer()
+        }
+        
+        let image = UIGraphicsGetImageFromCurrentImageContext()
+        
+        UIGraphicsEndImageContext()
+        
+        if cropped {
+            if let image = image {
+                return croppedImageByAlphaFor(image)
+            }
+        }
+        
+        return image
+    }
+    
+    /********************************** Private Functions **********************************/
     
     private func setTouchPoints(_ touch: UITouch,view: UIView) {
         previousPoint = touch.previousLocation(in: view)
@@ -259,8 +292,94 @@ open class SwiftyDrawView: UIView {
         self.setNeedsDisplay(drawBox)
         return subpath
     }
-}
-
-
-
     
+    /********************************** Private Image Helper Functions **********************************/
+    
+    func croppedImageByAlphaFor(_ image: UIImage) -> UIImage? {
+        let newRect = cropRectByAlphaFor(image)
+        if let cgImage = image.cgImage!.cropping(to: newRect) {
+            return UIImage(cgImage: cgImage)
+        }
+        return nil
+    }
+    
+    func cropRectByAlphaFor(_ image: UIImage) -> CGRect {
+        
+        let cgImage = image.cgImage
+        let context = createARGBBitmapContextFromImage(inImage: cgImage!)
+        if context == nil {
+            return CGRect.zero
+        }
+        
+        let height = CGFloat(cgImage!.height)
+        let width = CGFloat(cgImage!.width)
+        
+        let rect = CGRect(x: 0, y: 0, width: width, height: height)
+        context?.draw(cgImage!, in: rect)
+        
+        let data = context?.data?.assumingMemoryBound(to: UInt8.self)
+        
+        if data == nil {
+            return CGRect.zero
+        }
+        
+        var lowX = width
+        var lowY = height
+        var highX: CGFloat = 0
+        var highY: CGFloat = 0
+        
+        let heightInt = Int(height)
+        let widthInt = Int(width)
+        //Filter through data and look for non-transparent pixels.
+        for y in (0 ..< heightInt) {
+            let y = CGFloat(y)
+            for x in (0 ..< widthInt) {
+                let x = CGFloat(x)
+                let pixelIndex = (width * y + x) * 4 /* 4 for A, R, G, B */
+                
+                if data?[Int(pixelIndex)] != 0 { //Alpha value is not zero pixel is not transparent.
+                    if (x < lowX) {
+                        lowX = x
+                    }
+                    if (x > highX) {
+                        highX = x
+                    }
+                    if (y < lowY) {
+                        lowY = y
+                    }
+                    if (y > highY) {
+                        highY = y
+                    }
+                }
+            }
+        }
+        
+        return CGRect(x: lowX, y: lowY, width: highX - lowX, height: highY - lowY)
+    }
+    
+    func createARGBBitmapContextFromImage(inImage: CGImage) -> CGContext? {
+        
+        let width = inImage.width
+        let height = inImage.height
+        
+        let bitmapBytesPerRow = width * 4
+        let bitmapByteCount = bitmapBytesPerRow * height
+        
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        
+        let bitmapData = malloc(bitmapByteCount)
+        if bitmapData == nil {
+            return nil
+        }
+        
+        let context = CGContext (data: bitmapData,
+                                 width: width,
+                                 height: height,
+                                 bitsPerComponent: 8,      // bits per component
+            bytesPerRow: bitmapBytesPerRow,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue)
+        
+        return context
+    }
+}
