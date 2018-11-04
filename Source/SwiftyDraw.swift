@@ -103,16 +103,17 @@ open class SwiftyDrawView: UIView {
     /// Overriding draw(rect:) to stroke paths
     override open func draw(_ rect: CGRect) {
         guard let context: CGContext = UIGraphicsGetCurrentContext() else { return }
-        context.setLineCap(.round)
 
         for line in pathArray {
+            context.setLineCap(.round)
+            context.setLineJoin(.round)
             context.setLineWidth(line.brush.width)
+            // set blend mode so an eraser actually erases stuff
+            context.setBlendMode(line.brush.blendMode)
             context.setAlpha(line.brush.opacity)
             context.setStrokeColor(line.brush.color.cgColor)
             context.addPath(line.path)
-            context.beginTransparencyLayer(auxiliaryInfo: nil)
             context.strokePath()
-            context.endTransparencyLayer()
         }
     }
 
@@ -125,7 +126,7 @@ open class SwiftyDrawView: UIView {
         delegate?.swiftyDraw(didBeginDrawingIn: self, using: touch)
 
         setTouchPoints(touch, view: self)
-        let newLine = Line(path: CGMutablePath(), brush: Brush(color: brush.color, width: brush.width, opacity: brush.opacity))
+        let newLine = Line(path: CGMutablePath(), brush: Brush(color: brush.color, width: brush.width, opacity: brush.opacity, blendMode: brush.blendMode))
         newLine.path.addPath(createNewPath())
         pathArray.append(newLine)
         drawingHistory = pathArray // adding a new line should also update history
@@ -161,6 +162,7 @@ open class SwiftyDrawView: UIView {
     /// Displays paths passed by replacing all other contents with provided paths
     public func display(lines: [Line]) {
         pathArray = lines
+        drawingHistory = lines
         setNeedsDisplay()
     }
 
