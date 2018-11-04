@@ -207,9 +207,9 @@ open class SwiftyDrawView: UIView {
         context.setLineCap(.round)
 
         for line in pathArray {
-            context.setLineWidth(line.brush.width)
-            context.setAlpha(line.brush.opacity)
-            context.setStrokeColor(line.brush.color.cgColor)
+            context.setLineWidth(line.width)
+            context.setAlpha(line.opacity)
+            context.setStrokeColor(line.color.cgColor)
             context.addPath(line.path)
             context.beginTransparencyLayer(auxiliaryInfo: nil)
             context.strokePath()
