@@ -303,10 +303,10 @@ open class SwiftyDrawView: UIView {
 
         context.setLineCap(.round)
 
-        for line in pathArray {
+        for line in drawItems {
             context.setLineWidth(line.brush.width)
             context.setAlpha(line.brush.opacity)
-            context.setStrokeColor(line.brush.color.cgColor)
+            context.setStrokeColor(line.brush.color.uiColor.cgColor)
             context.addPath(line.path)
             context.beginTransparencyLayer(auxiliaryInfo: nil)
             context.strokePath()
