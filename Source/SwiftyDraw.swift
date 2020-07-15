@@ -18,8 +18,8 @@ import UIKit
 // MARK: - Public Protocol Declarations
 
 /// SwiftyDrawView Delegate
-public protocol SwiftyDrawViewDelegate: class {
-
+@objc public protocol SwiftyDrawViewDelegate: AnyObject {
+    
     /**
      SwiftyDrawViewDelegate called when a touch gesture should begin on the SwiftyDrawView using given touch type
 
@@ -60,139 +60,236 @@ public protocol SwiftyDrawViewDelegate: class {
 open class SwiftyDrawView: UIView {
 
     /// Current brush being used for drawing
-    public var brush: Brush = Brush.default
-    /// Sets whether touch gestures should be registered as drawing strokes on the current canvas
-    public var isEnabled: Bool = true
-    /// Public SwiftyDrawView delegate
-    public weak var delegate: SwiftyDrawViewDelegate?
+    public var brush: Brush = .default {
+        didSet {
+            previousBrush = oldValue
+        }
+    }
+    /// Determines whether touch gestures should be registered as drawing strokes on the current canvas
+    public var isEnabled = true
 
-    private var pathArray: [Line]  = []
-    public  var drawingHistory: [Line] = []
-    private var currentPoint: CGPoint = .zero
+    /// Determines how touch gestures are treated
+    /// draw - freehand draw
+    /// line - draws straight lines **WARNING:** experimental feature, may not work properly.
+    public enum DrawMode { case draw, line, ellipse, rect }
+    public var drawMode:DrawMode = .draw
+    
+    /// Determines whether paths being draw would be filled or stroked.
+    public var shouldFillPath = false
+
+    /// Determines whether responde to Apple Pencil interactions, like the Double tap for Apple Pencil 2 to switch tools.
+    public var isPencilInteractive : Bool = true {
+        didSet {
+            if #available(iOS 12.1, *) {
+                pencilInteraction.isEnabled  = isPencilInteractive
+            }
+        }
+    }
+    /// Public SwiftyDrawView delegate
+    @IBOutlet public weak var delegate: SwiftyDrawViewDelegate?
+    
+    @available(iOS 9.1, *)
+    public enum TouchType: Equatable, CaseIterable {
+        case finger, pencil
+        
+        var uiTouchTypes: [UITouch.TouchType] {
+            switch self {
+            case .finger:
+                return [.direct, .indirect]
+            case .pencil:
+                return [.pencil, .stylus  ]
+            }
+        }
+    }
+    /// Determines which touch types are allowed to draw; default: `[.finger, .pencil]` (all)
+    @available(iOS 9.1, *)
+    public lazy var allowedTouchTypes: [TouchType] = [.finger, .pencil]
+    
+    public  var drawItems: [DrawItem] = []
+    public  var drawingHistory: [DrawItem] = []
+    public  var firstPoint: CGPoint = .zero      // created this variable
+    public  var currentPoint: CGPoint = .zero     // made public
     private var previousPoint: CGPoint = .zero
     private var previousPreviousPoint: CGPoint = .zero
+    
+    // For pencil interactions
+    @available(iOS 12.1, *)
+    lazy private var pencilInteraction = UIPencilInteraction()
+    
+    /// Save the previous brush for Apple Pencil interaction Switch to previous tool
+    private var previousBrush: Brush = .default
+    
+    public enum ShapeType { case rectangle, roundedRectangle, ellipse }
 
-    public struct Line {
+    public struct DrawItem {
         public var path: CGMutablePath
         public var brush: Brush
-
-        init(path: CGMutablePath, brush: Brush) {
+        public var isFillPath: Bool
+        
+        public init(path: CGMutablePath, brush: Brush, isFillPath: Bool) {
             self.path = path
             self.brush = brush
-        }
-
-        public var closedPath: CGPath? {
-            let _path = path.mutableCopy()
-            _path?.closeSubpath()
-            return _path
+            self.isFillPath = isFillPath
         }
     }
 
     /// Public init(frame:) implementation
     override public init(frame: CGRect) {
         super.init(frame: frame)
-        self.backgroundColor = UIColor.clear
+        self.backgroundColor = .clear
+        // receive pencil interaction if supported
+        if #available(iOS 12.1, *) {
+            pencilInteraction.delegate = self
+            self.addInteraction(pencilInteraction)
+        }
     }
 
     /// Public init(coder:) implementation
     required public init?(coder aDecoder: NSCoder) {
         super.init(coder: aDecoder)
-        self.backgroundColor = UIColor.clear
+        self.backgroundColor = .clear
+        //Receive pencil interaction if supported
+        if #available(iOS 12.1, *) {
+            pencilInteraction.delegate = self
+            self.addInteraction(pencilInteraction)
+        }
     }
 
     /// Overriding draw(rect:) to stroke paths
     override open func draw(_ rect: CGRect) {
         guard let context: CGContext = UIGraphicsGetCurrentContext() else { return }
-
-        for line in pathArray {
+        
+        for item in drawItems {
             context.setLineCap(.round)
             context.setLineJoin(.round)
-            context.setLineWidth(line.brush.width)
-            // set blend mode so an eraser actually erases stuff
-            context.setBlendMode(line.brush.blendMode)
-            context.setAlpha(line.brush.opacity)
-            context.setStrokeColor(line.brush.color.cgColor)
-            context.addPath(line.path)
-            context.strokePath()
+            context.setLineWidth(item.brush.width)
+            context.setBlendMode(item.brush.blendMode.cgBlendMode)
+            context.setAlpha(item.brush.opacity)
+            if (item.isFillPath)
+            {
+                context.setFillColor(item.brush.color.uiColor.cgColor)
+                context.addPath(item.path)
+                context.fillPath()
+            }
+            else {
+                context.setStrokeColor(item.brush.color.uiColor.cgColor)
+                context.addPath(item.path)
+                context.strokePath()
+            }
         }
     }
-
+    
     /// touchesBegan implementation to capture strokes
     override open func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard let touch = touches.first else { return }
+        guard isEnabled, let touch = touches.first else { return }
+        if #available(iOS 9.1, *) {
+            guard allowedTouchTypes.flatMap({ $0.uiTouchTypes }).contains(touch.type) else { return }
+        }
         guard delegate?.swiftyDraw(shouldBeginDrawingIn: self, using: touch) ?? true else { return }
-
-        guard isEnabled else { return }
         delegate?.swiftyDraw(didBeginDrawingIn: self, using: touch)
 
         setTouchPoints(touch, view: self)
-        let newLine = Line(path: CGMutablePath(), brush: Brush(color: brush.color, width: brush.width, opacity: brush.opacity, blendMode: brush.blendMode))
-        newLine.path.addPath(createNewPath())
-        pathArray.append(newLine)
-        drawingHistory = pathArray // adding a new line should also update history
+        firstPoint = touch.location(in: self)
+        let newLine = DrawItem(path: CGMutablePath(),
+                           brush: Brush(color: brush.color.uiColor, width: brush.width, opacity: brush.opacity, blendMode: brush.blendMode), isFillPath: drawMode != .draw && drawMode != .line ? shouldFillPath : false)
+        addLine(newLine)
     }
 
     /// touchesMoves implementation to capture strokes
     override open func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard isEnabled else { return }
-        guard let touch = touches.first else { return }
+        guard isEnabled, let touch = touches.first else { return }
+        if #available(iOS 9.1, *) {
+            guard allowedTouchTypes.flatMap({ $0.uiTouchTypes }).contains(touch.type) else { return }
+        }
         delegate?.swiftyDraw(isDrawingIn: self, using: touch)
 
         updateTouchPoints(for: touch, in: self)
-        let newLine = createNewPath()
-        if let currentPath = pathArray.last {
-            currentPath.path.addPath(newLine)
+        
+        switch (drawMode) {
+        case .line:
+            drawItems.removeLast()
+            setNeedsDisplay()
+            let newLine = DrawItem(path: CGMutablePath(),
+                               brush: Brush(color: brush.color.uiColor, width: brush.width, opacity: brush.opacity, blendMode: brush.blendMode), isFillPath: false)
+            newLine.path.addPath(createNewStraightPath())
+            addLine(newLine)
+            break
+        case .draw:
+            let newPath = createNewPath()
+            if let currentPath = drawItems.last {
+                currentPath.path.addPath(newPath)
+            }
+            break
+        case .ellipse:
+            drawItems.removeLast()
+            setNeedsDisplay()
+            let newLine = DrawItem(path: CGMutablePath(),
+                               brush: Brush(color: brush.color.uiColor, width: brush.width, opacity: brush.opacity, blendMode: brush.blendMode), isFillPath: shouldFillPath)
+            newLine.path.addPath(createNewShape(type: .ellipse))
+            addLine(newLine)
+            break
+        case .rect:
+            drawItems.removeLast()
+            setNeedsDisplay()
+            let newLine = DrawItem(path: CGMutablePath(),
+                               brush: Brush(color: brush.color.uiColor, width: brush.width, opacity: brush.opacity, blendMode: brush.blendMode), isFillPath: shouldFillPath)
+            newLine.path.addPath(createNewShape(type: .rectangle))
+            addLine(newLine)
+            break
         }
     }
-
+    
+    func addLine(_ newLine: DrawItem) {
+        drawItems.append(newLine)
+        drawingHistory = drawItems // adding a new item should also update history
+    }
+    
     /// touchedEnded implementation to capture strokes
     override open func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard isEnabled else { return }
-        guard let touch = touches.first else { return }
+        guard isEnabled, let touch = touches.first else { return }
         delegate?.swiftyDraw(didFinishDrawingIn: self, using: touch)
     }
 
     /// touchedCancelled implementation
     override open func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard isEnabled else { return }
-        guard let touch = touches.first else { return }
+        guard isEnabled, let touch = touches.first else { return }
         delegate?.swiftyDraw(didCancelDrawingIn: self, using: touch)
     }
 
     /// Displays paths passed by replacing all other contents with provided paths
-    public func display(lines: [Line]) {
-        pathArray = lines
-        drawingHistory = lines
+    public func display(drawItems: [DrawItem]) {
+        self.drawItems = drawItems
+        drawingHistory = drawItems
         setNeedsDisplay()
     }
 
     /// Determines whether a last change can be undone
     public var canUndo: Bool {
-        return pathArray.count > 0
+        return drawItems.count > 0
     }
 
     /// Determines whether an undone change can be redone
     public var canRedo: Bool {
-        return drawingHistory.count > pathArray.count
+        return drawingHistory.count > drawItems.count
     }
 
     /// Undo the last change
     public func undo() {
-        guard pathArray.count > 0 else { return }
-        pathArray.removeLast()
+        guard canUndo else { return }
+        drawItems.removeLast()
         setNeedsDisplay()
     }
 
     /// Redo the last change
     public func redo() {
-        guard let line = drawingHistory[safe: pathArray.count] else { return }
-        pathArray.append(line)
+        guard canRedo, let line = drawingHistory[safe: drawItems.count] else { return }
+        drawItems.append(line)
         setNeedsDisplay()
     }
 
     /// Clear all stroked lines on canvas
     public func clear() {
-        pathArray = []
+        drawItems = []
         setNeedsDisplay()
     }
 
@@ -249,7 +346,37 @@ open class SwiftyDrawView: UIView {
         let newPath = addSubPathToPath(subPath)
         return newPath
     }
-
+    
+    private func createNewStraightPath() -> CGMutablePath {
+        let pt1 : CGPoint = firstPoint
+        let pt2 : CGPoint = currentPoint
+        let subPath = createStraightSubPath(pt1, mid2: pt2)
+        let newPath = addSubPathToPath(subPath)
+        return newPath
+    }
+    
+    private func createNewShape(type :ShapeType, corner:CGPoint = CGPoint(x: 1.0, y: 1.0)) -> CGMutablePath {
+        let pt1 : CGPoint = firstPoint
+        let pt2 : CGPoint = currentPoint
+        let width = abs(pt1.x - pt2.x)
+        let height = abs(pt1.y - pt2.y)
+        let newPath = CGMutablePath()
+        if width > 0, height > 0 {
+            let bounds = CGRect(x: min(pt1.x, pt2.x), y: min(pt1.y, pt2.y), width: width, height: height)
+            switch (type) {
+            case .ellipse:
+                newPath.addEllipse(in: bounds)
+                break
+            case .rectangle:
+                newPath.addRect(bounds)
+                break
+            case .roundedRectangle:
+                newPath.addRoundedRect(in: bounds, cornerWidth: corner.x, cornerHeight: corner.y)
+            }
+        }
+        return addSubPathToPath(newPath)
+    }
+    
     private func calculateMidPoint(_ p1 : CGPoint, p2 : CGPoint) -> CGPoint {
         return CGPoint(x: (p1.x + p2.x) * 0.5, y: (p1.y + p2.y) * 0.5);
     }
@@ -266,7 +393,14 @@ open class SwiftyDrawView: UIView {
         subpath.addQuadCurve(to: CGPoint(x: mid2.x, y: mid2.y), control: CGPoint(x: previousPoint.x, y: previousPoint.y))
         return subpath
     }
-
+    
+    private func createStraightSubPath(_ mid1: CGPoint, mid2: CGPoint) -> CGMutablePath {
+        let subpath : CGMutablePath = CGMutablePath()
+        subpath.move(to: mid1)
+        subpath.addLine(to: mid2)
+        return subpath
+    }
+    
     private func addSubPathToPath(_ subpath: CGMutablePath) -> CGMutablePath {
         let bounds : CGRect = subpath.boundingBox
         let drawBox : CGRect = bounds.insetBy(dx: -2.0 * brush.width, dy: -2.0 * brush.width)
@@ -371,5 +505,22 @@ extension Collection {
     /// Returns the element at the specified index if it is within bounds, otherwise nil.
     subscript (safe index: Index) -> Element? {
         return indices.contains(index) ? self[index] : nil
+    }
+}
+
+@available(iOS 12.1, *)
+extension SwiftyDrawView : UIPencilInteractionDelegate{
+    public func pencilInteractionDidTap(_ interaction: UIPencilInteraction) {
+        let preference = UIPencilInteraction.preferredTapAction
+        if preference == .switchEraser {
+            let currentBlend = self.brush.blendMode
+            if currentBlend != .clear {
+                self.brush.blendMode = .clear
+            } else {
+                self.brush.blendMode = .normal
+            }
+        } else if preference == .switchPrevious {
+            self.brush = self.previousBrush
+        }
     }
 }
