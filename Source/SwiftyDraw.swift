@@ -309,10 +309,10 @@ open class SwiftyDrawView: UIView {
 
     /// Return a (possibly) scaled and (possibly) cropped image of the drawing.
 
-    public func asImage(scale: CGFloat = 1, cropped: Bool = false) -> UIImage? {
+    public func asImage(scale: CGFloat = 1, cropped: Bool = false) -> (image: UIImage?, rect: CGRect?) {
         UIGraphicsBeginImageContextWithOptions(bounds.size, false, scale)
         guard let context = UIGraphicsGetCurrentContext() else {
-            return nil
+            return (nil, nil)
         }
 
         context.setLineCap(.round)
@@ -333,11 +333,11 @@ open class SwiftyDrawView: UIView {
 
         if cropped {
             if let image = image {
-                return croppedImageByAlphaFor(image)
+                return return image.cropAlpha()
             }
         }
 
-        return image
+        return (image, nil)
     }
 
     /********************************** Private Functions **********************************/
@@ -571,5 +571,54 @@ extension SwiftyDrawView.DrawItem: Codable {
         case brush
         case path
         case isFillPath
+    }
+}
+extension UIImage {
+    
+    func cropAlpha() -> (UIImage, CGRect?) {
+        let cgImage = self.cgImage!;
+        
+        let width = cgImage.width
+        let height = cgImage.height
+        
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bytesPerPixel:Int = 4
+        let bytesPerRow = bytesPerPixel * width
+        let bitsPerComponent = 8
+        let bitmapInfo: UInt32 = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        
+        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: bitsPerComponent, bytesPerRow: bytesPerRow, space: colorSpace, bitmapInfo: bitmapInfo),
+              let ptr = context.data?.assumingMemoryBound(to: UInt8.self) else {
+            return (self, nil)
+        }
+        
+        context.draw(self.cgImage!, in: CGRect(x: 0, y: 0, width: width, height: height))
+        
+        var minX = width
+        var minY = height
+        var maxX: Int = 0
+        var maxY: Int = 0
+        
+        for x in 1 ..< width {
+            for y in 1 ..< height {
+                
+                let i = bytesPerRow * Int(y) + bytesPerPixel * Int(x)
+                let a = CGFloat(ptr[i + 3]) / 255.0
+                
+                if(a>0) {
+                    if (x < minX) { minX = x };
+                    if (x > maxX) { maxX = x };
+                    if (y < minY) { minY = y};
+                    if (y > maxY) { maxY = y};
+                }
+            }
+        }
+        
+        let rect = CGRect(x: CGFloat(minX),y: CGFloat(minY), width: CGFloat(maxX-minX), height: CGFloat(maxY-minY))
+        let imageScale:CGFloat = self.scale
+        let croppedImage =  self.cgImage!.cropping(to: rect)!
+        let ret = (UIImage(cgImage: croppedImage, scale: imageScale, orientation: self.imageOrientation), rect)
+        
+        return ret;
     }
 }
